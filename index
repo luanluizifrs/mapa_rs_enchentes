@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <!-- ========================================
+         META TAGS
+         ======================================== -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Mapa interativo dos municípios atingidos pelas enchentes do Rio Grande do Sul em maio de 2024">
+    <meta name="author" content="Governo RS / Defesa Civil">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
+    <title>Mapa das Enchentes do RS - Maio 2024</title>
+    
+    <!-- ========================================
+         BIBLIOTECAS EXTERNAS - LEAFLET
+         ======================================== -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin="" />
+    
+    <!-- ========================================
+         CSS - ESTILOS
+         ======================================== -->
+    <style>
+        /* ====================================
+           RESET E CONFIGURAÇÕES BÁSICAS
+           ==================================== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 
+                         Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+            overflow: hidden;
+        }
+        
+        /* ====================================
+           CONTAINER DO MAPA
+           ==================================== */
+        #map {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        
+        /* ====================================
+           TOOLTIPS (Nomes das cidades)
+           ==================================== */
+        .leaflet-tooltip {
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 2px solid #ff8c00;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-weight: bold;
+            font-size: 13px;
+            color: #333;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            font-family: inherit;
+        }
+        
+        /* ====================================
+           LEGENDA
+           ==================================== */
+        .legend {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            line-height: 24px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        
+        .legend h4 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .legend-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .legend-color {
+            width: 30px;
+            height: 20px;
+            margin-right: 10px;
+            border: 1px solid #999;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+        
+        /* ====================================
+           RESPONSIVIDADE - MOBILE
+           ==================================== */
+        @media (max-width: 768px) {
+            .legend {
+                font-size: 12px;
+                padding: 10px;
+            }
+            
+            .legend h4 {
+                font-size: 14px;
+            }
+            
+            .legend-color {
+                width: 25px;
+                height: 18px;
+            }
+            
+            .leaflet-tooltip {
+                font-size: 11px;
+                padding: 6px 10px;
+            }
+        }
+        
+        /* ====================================
+           CONTROLES DO MAPA
+           ==================================== */
+        .leaflet-control-zoom {
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+        
+        /* ====================================
+           LOADING (opcional)
+           ==================================== */
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- ========================================
+         CONTAINER DO MAPA
+         ======================================== -->
+    <div id="map"></div>
+    
+    <!-- Loading (opcional) -->
+    <div id="loading" class="loading">
+        Carregando mapa...
+    </div>
+    
+    <!-- ========================================
+         BIBLIOTECAS JAVASCRIPT - LEAFLET
+         ======================================== -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
+            crossorigin=""></script>
+    
+    <!-- ========================================
+         JAVASCRIPT - LÓGICA DO MAPA
+         ======================================== -->
+    <script>
+        /* ====================================
+           CONFIGURAÇÕES INICIAIS
+           ==================================== */
+        
+        // Versão do mapa (para debugging)
+        const VERSAO_MAPA = '2.0.0';
+        console.log('Mapa das Enchentes RS - Versão:', VERSAO_MAPA);
+        
+        // Centro do mapa (Rio Grande do Sul)
+        const RS_CENTER = [-30.0346, -51.2177];
+        const RS_ZOOM = 7;
+        
+        // URL do GeoJSON (contornos dos municípios)
+        const GEOJSON_URL = 'https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-43-mun.json';
+        
+        // Cores do mapa
+        const CORES = {
+            municipioAtingido: {
+                fill: '#ff8c00',      // Laranja
+                border: '#ff6600',     // Laranja escuro
+                fillOpacity: 0.7
+            },
+            municipioNaoAtingido: {
+                fill: '#ffffff',       // Branco
+                border: '#999999',     // Cinza
+                fillOpacity: 0.3
+            },
+            hover: {
+                atingido: '#ff4500',   // Laranja mais escuro no hover
+                naoAtingido: '#666'    // Cinza escuro no hover
+            }
+        };
+        
+        /* ====================================
+           LISTA DE MUNICÍPIOS ATINGIDOS
+           Fonte: Decreto 57.646 de 30/05/2024
+           ==================================== */
+        const municipiosAtingidos = [
+            "Aceguá", "Agudo", "Água Santa", "Ajuricaba", "Alecrim", "Alegrete", 
+            "Alegria", "Alpestre", "Alto Alegre", "Alto Feliz", "Alvorada", 
+            "Amaral Ferrador", "Ametista do Sul", "André da Rocha", "Anta Gorda", 
+            "Arambaré", "Araricá", "Aratiba", "Arroio do Meio", "Arroio do Tigre", 
+            "Arroio dos Ratos", "Arroio Grande", "Arvorezinha", "Augusto Pestana", 
+            "Áurea", "Balneário Pinhal", "Barão", "Barão de Cotegipe", 
+            "Barra do Guarita", "Barra do Ribeiro", "Barra do Rio Azul", "Barra Funda", 
+            "Barros Cassal", "Benjamin Constant do Sul", "Bento Gonçalves", 
+            "Boa Vista das Missões", "Boa Vista do Incra", "Boa Vista do Sul", 
+            "Bom Jesus", "Bom Princípio", "Bom Progresso", "Bom Retiro do Sul", 
+            "Boqueirão do Leão", "Braga", "Brochier", "Caçapava do Sul", "Cacequi", 
+            "Cachoeira do Sul", "Cachoeirinha", "Cacique Doble", "Caiçara", "Camaquã", 
+            "Cambará do Sul", "Camargo", "Campestre da Serra", "Campina das Missões", 
+            "Campinas do Sul", "Campo Bom", "Campos Borges", "Candelária", 
+            "Cândido Godói", "Candiota", "Canela", "Canguçu", "Canoas", 
+            "Canudos do Vale", "Capão do Leão", "Capela de Santana", "Capitão", 
+            "Capivari do Sul", "Carlos Barbosa", "Carlos Gomes", "Casca", "Catuípe", 
+            "Caxias do Sul", "Centenário", "Cerrito", "Cerro Branco", "Cerro Grande", 
+            "Cerro Grande do Sul", "Chapada", "Charqueadas", "Chiapetta", "Ciríaco", 
+            "Colinas", "Colorado", "Condor", "Constantina", "Coqueiro Baixo", 
+            "Coronel Bicaco", "Coronel Pilar", "Cotiporã", "Cristal", "Cristal do Sul", 
+            "Cruz Alta", "Cruzaltense", "Cruzeiro do Sul", "David Canabarro", 
+            "Derrubadas", "Dezesseis de Novembro", "Dilermando de Aguiar", 
+            "Dois Irmãos", "Dois Irmãos das Missões", "Dois Lajeados", "Dom Feliciano", 
+            "Dom Pedro de Alcântara", "Dona Francisca", "Doutor Maurício Cardoso", 
+            "Doutor Ricardo", "Eldorado do Sul", "Encantado", "Encruzilhada do Sul", 
+            "Engenho Velho", "Entre Rios do Sul", "Erebango", "Erechim", "Erval Grande", 
+            "Erval Seco", "Esmeralda", "Espumoso", "Estação", "Esteio", "Estrela", 
+            "Estrela Velha", "Fagundes Varela", "Farroupilha", "Faxinal do Soturno", 
+            "Faxinalzinho", "Fazenda Vilanova", "Feliz", "Floriano Peixoto", 
+            "Flores da Cunha", "Fontoura Xavier", "Formigueiro", "Forquetinha", 
+            "Fortaleza dos Valos", "Frederico Westphalen", "Garibaldi", "Garruchos", 
+            "General Câmara", "Gentil", "Getúlio Vargas", "Giruá", "Gramado", 
+            "Gramado dos Loureiros", "Gramado Xavier", "Gravataí", "Guabiju", 
+            "Guaíba", "Guaporé", "Harmonia", "Herval", "Herveiras", "Humaitá", 
+            "Ibarama", "Ibiaçá", "Ibiraiaras", "Ibirapuitã", "Ibirubá", "Igrejinha", 
+            "Ijuí", "Ilópolis", "Imbé", "Imigrante", "Independência", "Inhacorá", 
+            "Ipê", "Iraí", "Itaara", "Itapuca", "Itaqui", "Itati", "Itatiba do Sul", 
+            "Ivoti", "Ivorá", "Jaboticaba", "Jacuizinho", "Jaguarão", "Jaguari", 
+            "Jaquirana", "Jari", "Jóia", "Júlio de Castilhos", "Lagoa Bonita do Sul", 
+            "Lagoa dos Três Cantos", "Lagoão", "Lajeado", "Lajeado do Bugre", 
+            "Lavras do Sul", "Liberato Salzano", "Lindolfo Collor", "Maçambara", 
+            "Machadinho", "Manoel Viana", "Maquiné", "Maratá", "Marau", 
+            "Marcelino Ramos", "Mariano Moro", "Marques de Souza", "Mata", 
+            "Mato Leitão", "Maximiliano de Almeida", "Miraguaí", "Montauri", 
+            "Monte Alegre dos Campos", "Montenegro", "Mormaço", "Mostardas", 
+            "Muçum", "Muitos Capões", "Muliterno", "Não-Me-Toque", "Nonoai", 
+            "Nova Alvorada", "Nova Bassano", "Nova Boa Vista", "Nova Bréscia", 
+            "Nova Esperança do Sul", "Nova Hartz", "Nova Palma", "Nova Petrópolis", 
+            "Nova Prata", "Nova Ramada", "Nova Roma do Sul", "Nova Santa Rita", 
+            "Novo Barreiro", "Novo Cabrais", "Novo Hamburgo", "Novo Machado", 
+            "Novo Tiradentes", "Novo Xingu", "Osório", "Paim Filho", "Palmares do Sul", 
+            "Palmeira das Missões", "Palmitinho", "Panambi", "Pantano Grande", 
+            "Paraí", "Paraíso do Sul", "Pareci Novo", "Parobé", "Passa Sete", 
+            "Passo do Sobrado", "Passo Fundo", "Paulo Bento", "Paverama", 
+            "Pedras Altas", "Pedro Osório", "Pelotas", "Picada Café", "Pinhal", 
+            "Pinhal da Serra", "Pinhal Grande", "Pinheirinho do Vale", "Pinheiro Machado", 
+            "Piratini", "Planalto", "Poço das Antas", "Pontão", "Ponte Preta", 
+            "Portão", "Porto Alegre", "Porto Lucena", "Porto Mauá", "Porto Xavier", 
+            "Pouso Novo", "Presidente Lucena", "Progresso", "Protásio Alves", 
+            "Putinga", "Quaraí", "Quevedos", "Quinze de Novembro", "Redentora", 
+            "Relvado", "Restinga Seca", "Rio dos Índios", "Rio Grande", "Rio Pardo", 
+            "Riozinho", "Roca Sales", "Rodeio Bonito", "Rolador", "Rolante", 
+            "Ronda Alta", "Rondinha", "Roque Gonzales", "Rosário do Sul", 
+            "Sagrada Família", "Salto do Jacuí", "Salvador das Missões", 
+            "Salvador do Sul", "Sananduva", "Santa Clara do Sul", "Santa Cruz do Sul", 
+            "Santa Margarida do Sul", "Santa Maria", "Santa Rosa", "Santa Tereza", 
+            "Santa Vitória do Palmar", "Santana da Boa Vista", "Santiago", 
+            "Santo Ângelo", "Santo Antônio da Patrulha", "Santo Antônio do Palma", 
+            "Santo Antônio do Planalto", "Santo Augusto", "Santo Cristo", 
+            "Santo Expedito do Sul", "São Borja", "São Domingos do Sul", 
+            "São Francisco de Assis", "São Francisco de Paula", "São Gabriel", 
+            "São Jerônimo", "São João do Polêsine", "São Jorge", "São José das Missões", 
+            "São José do Herval", "São José do Hortêncio", "São José do Inhacorá", 
+            "São José do Norte", "São José do Ouro", "São Leopoldo", "São Lourenço do Sul", 
+            "São Martinho", "São Martinho da Serra", "São Miguel das Missões", 
+            "São Paulo das Missões", "São Pedro das Missões", "São Pedro do Sul", 
+            "São Sebastião do Caí", "São Sepé", "São Valentim", "São Valentim do Sul", 
+            "São Valério do Sul", "São Vendelino", "São Vicente do Sul", "Sapiranga", 
+            "Sapucaia do Sul", "Seberi", "Sede Nova", "Segredo", "Selbach", 
+            "Senador Salgado Filho", "Sentinela do Sul", "Serafina Corrêa", "Sério", 
+            "Sertão", "Sete de Setembro", "Severiano de Almeida", "Silveira Martins", 
+            "Sinimbu", "Sobradinho", "Soledade", "Tabaí", "Tapera", "Taquara", 
+            "Taquari", "Taquaruçu do Sul", "Tavares", "Tenente Portela", "Teutônia", 
+            "Tiradentes do Sul", "Toropi", "Torres", "Tramandaí", "Travesseiro", 
+            "Três Arroios", "Três Coroas", "Três Forquilhas", "Três Palmeiras", 
+            "Três Passos", "Trindade do Sul", "Triunfo", "Tucunduva", "Tunas", 
+            "Tupanciretã", "Tupandi", "Tuparendi", "Ubiretama", "União da Serra", 
+            "Uruguaiana", "Vacaria", "Vale do Sol", "Vale Real", "Vale Verde", 
+            "Vanini", "Venâncio Aires", "Vera Cruz", "Veranópolis", "Vespasiano Correa", 
+            "Viadutos", "Viamão", "Vicente Dutra", "Victor Graeff", "Vila Maria", 
+            "Vila Nova do Sul", "Vista Alegre", "Vista Alegre do Prata", "Vista Gaúcha", 
+            "Vitória das Missões", "Westfalia", "Xangri-lá"
+        ];
+        
+        /* ====================================
+           FUNÇÕES AUXILIARES
+           ==================================== */
+        
+        /**
+         * Remove acentos e normaliza texto para comparação
+         * @param {string} texto - Texto a ser normalizado
+         * @returns {string} Texto sem acentos em maiúsculas
+         */
+        function normalizar(texto) {
+            return texto
+                .normalize('NFD')
+                .replace(/[̀-ͯ]/g, '')
+                .toUpperCase()
+                .trim();
+        }
+        
+        /**
+         * Verifica se um município está na lista de atingidos
+         * @param {string} nomeMunicipio - Nome do município
+         * @returns {boolean}
+         */
+        function isMunicipioAtingido(nomeMunicipio) {
+            return municipiosAtingidosSet.has(normalizar(nomeMunicipio));
+        }
+        
+        /* ====================================
+           PREPARAR DADOS
+           ==================================== */
+        
+        // Criar Set para busca rápida (O(1))
+        const municipiosAtingidosSet = new Set(
+            municipiosAtingidos.map(m => normalizar(m))
+        );
+        
+        console.log(`Total de municípios atingidos: ${municipiosAtingidos.length}`);
+        
+        /* ====================================
+           INICIALIZAR MAPA
+           ==================================== */
+        
+        // Criar mapa
+        const map = L.map('map', {
+            center: RS_CENTER,
+            zoom: RS_ZOOM,
+            zoomControl: true,
+            attributionControl: true
+        });
+        
+        // Adicionar camada base (OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 18,
+            minZoom: 6
+        }).addTo(map);
+        
+        // Posicionar controles de zoom
+        map.zoomControl.setPosition('topleft');
+        
+        /* ====================================
+           ESTILIZAÇÃO DOS MUNICÍPIOS
+           ==================================== */
+        
+        /**
+         * Define o estilo de cada município
+         * @param {object} feature - Feature do GeoJSON
+         * @returns {object} Estilo CSS
+         */
+        function getStyle(feature) {
+            // Tentar pegar o nome do município de diferentes propriedades
+            const nomeMunicipio = feature.properties.name || 
+                                 feature.properties.Nome || 
+                                 feature.properties.NM_MUN || 
+                                 '';
+            
+            const isAtingido = isMunicipioAtingido(nomeMunicipio);
+            
+            return {
+                fillColor: isAtingido ? CORES.municipioAtingido.fill : CORES.municipioNaoAtingido.fill,
+                weight: 1.5,
+                opacity: 1,
+                color: isAtingido ? CORES.municipioAtingido.border : CORES.municipioNaoAtingido.border,
+                fillOpacity: isAtingido ? CORES.municipioAtingido.fillOpacity : CORES.municipioNaoAtingido.fillOpacity
+            };
+        }
+        
+        /**
+         * Adiciona interatividade a cada município
+         * @param {object} feature - Feature do GeoJSON
+         * @param {object} layer - Layer do Leaflet
+         */
+        function onEachFeature(feature, layer) {
+            const nomeMunicipio = feature.properties.name || 
+                                 feature.properties.Nome || 
+                                 feature.properties.NM_MUN || 
+                                 'Município';
+            
+            const isAtingido = isMunicipioAtingido(nomeMunicipio);
+            
+            // Adicionar tooltip (aparece ao passar o mouse)
+            layer.bindTooltip(nomeMunicipio, {
+                permanent: false,
+                direction: 'center',
+                className: 'leaflet-tooltip'
+            });
+            
+            // Eventos de mouse
+            layer.on({
+                // Ao passar o mouse
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({
+                        weight: 3,
+                        color: isAtingido ? CORES.hover.atingido : CORES.hover.naoAtingido,
+                        fillOpacity: isAtingido ? 0.9 : 0.5
+                    });
+                    
+                    // Trazer para frente
+                    if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                        layer.bringToFront();
+                    }
+                },
+                
+                // Ao tirar o mouse
+                mouseout: function(e) {
+                    geojsonLayer.resetStyle(e.target);
+                },
+                
+                // Ao clicar (opcional - pode adicionar popup)
+                click: function(e) {
+                    // map.fitBounds(e.target.getBounds()); // Zoom no município
+                    console.log('Clicou em:', nomeMunicipio, '- Atingido:', isAtingido);
+                }
+            });
+        }
+        
+        /* ====================================
+           CARREGAR GEOJSON E RENDERIZAR
+           ==================================== */
+        
+        let geojsonLayer; // Variável global para resetar estilos
+        
+        // Mostrar loading (opcional)
+        // document.getElementById('loading').classList.add('active');
+        
+        fetch(GEOJSON_URL)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Erro ao carregar dados geográficos');
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('GeoJSON carregado com sucesso');
+                
+                // Criar camada GeoJSON
+                geojsonLayer = L.geoJSON(data, {
+                    style: getStyle,
+                    onEachFeature: onEachFeature
+                }).addTo(map);
+                
+                // Ajustar zoom para mostrar todo o RS
+                map.fitBounds(geojsonLayer.getBounds());
+                
+                // Esconder loading
+                // document.getElementById('loading').classList.remove('active');
+                
+                console.log('Mapa renderizado com sucesso!');
+            })
+            .catch(error => {
+                console.error('Erro ao carregar GeoJSON:', error);
+                alert('Erro ao carregar o mapa. Por favor, recarregue a página.');
+                // document.getElementById('loading').classList.remove('active');
+            });
+        
+        /* ====================================
+           ADICIONAR LEGENDA
+           ==================================== */
+        
+        const legend = L.control({ position: 'bottomright' });
+        
+        legend.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'legend');
+            
+            div.innerHTML = 
+                '<h4>Legenda</h4>' +
+                '<div class="legend-item">' +
+                    '<div class="legend-color" style="background-color: ' + CORES.municipioAtingido.fill + '; border-color: ' + CORES.municipioAtingido.border + ';"></div>' +
+                    '<span><strong>Municípios Atingidos (' + municipiosAtingidos.length + ')</strong></span>' +
+                '</div>' +
+                '<div class="legend-item">' +
+                    '<div class="legend-color" style="background-color: ' + CORES.municipioNaoAtingido.fill + '; border-color: ' + CORES.municipioNaoAtingido.border + ';"></div>' +
+                    '<span>Municípios Não Atingidos</span>' +
+                '</div>';
+            
+            return div;
+        };
+        
+        legend.addTo(map);
+        
+        /* ====================================
+           INFORMAÇÕES NO CONSOLE
+           ==================================== */
+        
+        console.log('=====================================');
+        console.log('MAPA DAS ENCHENTES DO RS - MAIO 2024');
+        console.log('=====================================');
+        console.log('Fonte: Decreto 57.646 de 30/05/2024');
+        console.log('Municípios atingidos:', municipiosAtingidos.length);
+        console.log('Versão:', VERSAO_MAPA);
+        console.log('=====================================');
+        
+    </script>
+</body>
+</html>
